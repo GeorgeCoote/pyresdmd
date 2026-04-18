@@ -1,6 +1,6 @@
-from pyresdmd.dicts.nn.relu import ReLUModule
-from pyresdmd.dicts import BaseDictionary
 import torch
+from pyresdmd.dicts import BaseDictionary
+from pyresdmd.dicts.nn.relu import ReLUModule
 
 class ReLUDictionary(BaseDictionary):
     def __init__(self, input_dim: int, n_functions: int, hidden_dim: int = 32, hidden_layers: int = 1):
