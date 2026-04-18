@@ -4,7 +4,7 @@ def _quadrature_weights(M, quadrature_weights = None, device = None) -> torch.Te
     '''
     Helper function which handles quadrature weights. If none are given, we default to uniform weights.
     
-    If weights are proved, we check their size and move them to the appropriate device. 
+    If weights are provided, we check their size and move them to the appropriate device. 
     '''
     if quadrature_weights is not None:
         if W.shape[0] != M:
