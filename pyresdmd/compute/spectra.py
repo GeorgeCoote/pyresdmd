@@ -7,10 +7,11 @@ def _quadrature_weights(M, quadrature_weights = None, device = None) -> torch.Te
     If weights are provided, we check their size and move them to the appropriate device. 
     '''
     if quadrature_weights is not None:
-        if W.shape[0] != M:
-            raise ValueError(f"Number of quadrature weights ({W.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
+        if quadrature_weights.shape[0] != M:
+            raise ValueError(f"Number of quadrature weights ({quadrature_weights.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
+        W = quadrature_weights
         if device is not None:
-            W = quadrature_weights.to(device) 
+            W = W.to(device) 
     
     else:
         W = torch.ones(M) / M
@@ -60,7 +61,7 @@ def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
         If Psi_X and Psi_Y have different shapes.
     '''
     if W.shape[0] != Psi_X.shape[0]:
-        raise ValueError("Number of quadrature weights ({W.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
+        raise ValueError(f"Number of quadrature weights ({W.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
     
     if (W < 0).any():
         raise ValueError("Quadrature weights must be non-negative.")
@@ -131,7 +132,7 @@ def compute_eigendecomposition(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadr
         The Hankel matrix Psi_X
     Psi_Y : torch.Tensor 
         The Hankel matrix Psi_Y 
-    W : torch.Tensor 
+    quadrature_weights : torch.Tensor 
         Torch tensor of quadrature weights
     same_device : bool
         If W is not on the same device as Psi_X, it will be moved there if this is set to True.
@@ -156,7 +157,7 @@ def compute_eigendecomposition(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadr
 
     return torch.linalg.eig(K)
 
-def compute_residuals(K : torch.Tensor, V : torch.Tensor, Lambda : torch.Tensor, Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor
+def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
                      same_device : bool = True) -> torch.Tensor:
     '''
     Computes ResDMD residuals based off EDMD matrix, eigendecomposition, Hankel matrices and quadrature weights. 
@@ -174,14 +175,11 @@ def compute_residuals(K : torch.Tensor, V : torch.Tensor, Lambda : torch.Tensor,
     
     Parameters
     ----------------------------------
-    K : torch.Tensor 
-        EDMD matrix. 
+    Lambda : torch.Tensor 
+        Eigenvalues in eigendecomposition
     
     V : torch.Tensor 
         Eigenvectors in eigendecomposition 
-       
-    Lambda : torch.Tensor 
-        Eigenvalues in eigendecomposition
     
     Psi_X : torch.Tensor 
         Hankel matrix for x
@@ -193,7 +191,7 @@ def compute_residuals(K : torch.Tensor, V : torch.Tensor, Lambda : torch.Tensor,
         Matrix of quadrature weights
 
     same_device : bool
-        Moves quadrature weights to the same device as K, if it not already there.
+        Moves quadrature weights to the same device as Psi_X, if it not already there.
     
     Returns 
     ----------------------------------
@@ -201,12 +199,15 @@ def compute_residuals(K : torch.Tensor, V : torch.Tensor, Lambda : torch.Tensor,
         Tensor of residuals for each eigenpair 
     '''
     M = Psi_X.shape[0]
-    device = K.device if same_device else None
+    device = Psi_X.device if same_device else None
 
     W = _quadrature_weights(M, W, device)
     W_sqrt = torch.sqrt(W).unsqueeze(1)
-    WPsi_X = (W_sqrt * Psi_X).to(torch.complex64)
-    WPsi_Y = (W_sqrt * Psi_Y).to(torch.complex64)
+
+    # need to cast to complex dtype because Lambda is complex
+    complex_dtype = torch.complex128 if Psi_X.dtype == torch.float64 else torch.complex64
+    WPsi_X = (W_sqrt * Psi_X).to(complex_dtype)
+    WPsi_Y = (W_sqrt * Psi_Y).to(complex_dtype)
     
     diff = WPsi_Y @ V - (WPsi_X @ V) * Lambda.unsqueeze(0) # = [... - ... * lambda_1, ... - ... * lambda_2, ...] etc.
     numerators = torch.linalg.vector_norm(diff, ord = 2, dim = 0)
@@ -215,8 +216,7 @@ def compute_residuals(K : torch.Tensor, V : torch.Tensor, Lambda : torch.Tensor,
     return (numerators / denominators).real 
 
 def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor, 
-    eps : float = 1e-8, loss_threshold : float = 1e3, penalty_coef : float = 1e-2,
-    condition_penalty : bool = True,
+    eps : float = 1e-8, loss_threshold : float = 1e3, condition_penalty : bool = True, penalty_coef : float = 1e-2,
 ) -> float:
     '''
     Computes loss function based off singular values of weighted Hankel matrix. 
@@ -249,8 +249,9 @@ def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor,
     ----------------------------------
     Loss computed by the above formula.
     '''
+    condition_penalty_flag = condition_penalty # to avoid confusion with cond_penalty
     N = residuals.shape[0]
     log_kappa = torch.log(singvals[0] + eps) - torch.log(singvals[-1] + eps)
     log_kappa_thresh = torch.log(torch.tensor(loss_threshold, device = singvals.device))
-    cond_penalty = torch.relu(log_kappa - log_kappa_thresh) if condition_penalty else torch.zeros_like(log_kappa)
+    cond_penalty = torch.relu(log_kappa - log_kappa_thresh) if condition_penalty_flag else torch.zeros_like(log_kappa)
     return (1/N)*torch.sum(residuals * residuals) + penalty_coef * cond_penalty
