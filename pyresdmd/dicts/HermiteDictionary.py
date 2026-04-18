@@ -63,7 +63,7 @@ class HermiteDictionary(BaseDictionary):
         for j in range(2, self.degree + 1):
             out[:, j] = 2 * x * out[:, j - 1] - 2 * (j - 1) * out[:, j - 2]
         
-        return out * torch.exp(-x*x/2)[:, None]
+        return out * torch.exp(-x*x/2).unsqueeze(1)
     
     def __repr__(self) -> str:
         '''
