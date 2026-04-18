@@ -76,7 +76,7 @@ class TrainableDictionary(nn.Module):
     
     def forward(self, x : torch.Tensor, y : torch.Tensor) -> torch.Tensor:
         '''
-        Performs a forward pass using eigvals_eigvecs and the trained dictionary. 
+        Performs a forward pass using resdmd.compute.spectra and the trained dictionary. 
         
         Parameters 
         ----------------------------------
@@ -88,8 +88,12 @@ class TrainableDictionary(nn.Module):
         
         Returns 
         ----------------------------------
-        tuple[torch.Tensor, torch.Tensor] 
-            Result of forward pass
+        dict 
+            'eigenvalues': The eigenvalues of the EDMD matrix 
+            'eigenvectors': The eigenvectors of the EDMD matrix 
+            'cond_num': The condition number of W^(1/2) Psi_X 
+            'residuals': The residuals associated with the approximated eigenvalues 
+            'loss': The overall loss
         '''
         Psi_X, Psi_Y = self.compute_psi(x, y) # trained dictionary comes in here
         return spectra(Psi_X, Psi_Y, self.quadrature_weights, self.eps)
