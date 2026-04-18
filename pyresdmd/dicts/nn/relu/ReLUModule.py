@@ -33,7 +33,7 @@ class ReLUModule(nn.Module):
         
         layers = [nn.Linear(input_dim, hidden_dim), nn.ReLU()]
         
-        for i in range(hidden_layers - 1):
+        for i in range(hidden_layers):
             layers.extend([nn.Linear(in_features, hidden_dim), nn.ReLU()])
         
         layers.append(nn.Linear(hidden_dim, 1))
