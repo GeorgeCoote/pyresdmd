@@ -55,25 +55,6 @@ class TrainableDictionary(nn.Module):
         '''
         self.eps = eps
     
-    def compute_psi(self, x : torch.Tensor, y : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        '''
-        Produces Hankel matrices for the trained matrix. 
-
-        Parameters 
-        ----------------------------------
-        x : torch.Tensor 
-            Trajectory data for x 
-        
-        y : torch.Tensor 
-            Trajectory data for x 
-        
-        Returns 
-        ----------------------------------
-        tuple[torch.Tensor, torch.Tensor] 
-            Produces a tuple containing the two Hankel matrices Psi_X and Psi_Y. 
-        '''
-        return self.evaluate(x), self.evaluate(y)
-    
     def forward(self, x : torch.Tensor, y : torch.Tensor) -> torch.Tensor:
         '''
         Performs a forward pass using resdmd.compute.spectra and the trained dictionary. 
@@ -95,5 +76,5 @@ class TrainableDictionary(nn.Module):
             'residuals': The residuals associated with the approximated eigenvalues 
             'loss': The overall loss
         '''
-        Psi_X, Psi_Y = self.compute_psi(x, y) # trained dictionary comes in here
+        Psi_X, Psi_Y = self.evaluate(x), self.evaluate(y) # trained dictionary comes in here
         return spectra(Psi_X, Psi_Y, self.quadrature_weights, self.eps)
