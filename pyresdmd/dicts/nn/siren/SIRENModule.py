@@ -81,7 +81,7 @@ class SIRENModule(nn.Module):
         self.hidden_dim = hidden_dim
         
         layers = [SirenLayer(input_dim, hidden_dim, w0 = w0_first, is_first = True)]
-               + [SirenLayer(hidden_dim, hidden_dim, w0 = w, is_first = False) for _ in range(hidden_layers - 1)]
+               + [SirenLayer(hidden_dim, hidden_dim, w0 = w, is_first = False) for _ in range(hidden_layers)]
                 
         output_layer = nn.Linear(hidden_dim, 1)
         
