@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class SirenLayer(nn.Module):
+class SIRENLayer(nn.Module):
     def __init__(self, input_dim, output_dim, w0 = 30.0, is_first = False):
         '''
         Initializes a SIREN layer.
@@ -80,8 +80,8 @@ class SIRENModule(nn.Module):
         self.input_dim = input_dim 
         self.hidden_dim = hidden_dim
         
-        layers = [SirenLayer(input_dim, hidden_dim, w0 = w0_first, is_first = True)]
-               + [SirenLayer(hidden_dim, hidden_dim, w0 = w, is_first = False) for _ in range(hidden_layers)]
+        layers = [SIRENLayer(input_dim, hidden_dim, w0 = w0_first, is_first = True)]
+               + [SIRENLayer(hidden_dim, hidden_dim, w0 = w, is_first = False) for _ in range(hidden_layers)]
                 
         output_layer = nn.Linear(hidden_dim, 1)
         
