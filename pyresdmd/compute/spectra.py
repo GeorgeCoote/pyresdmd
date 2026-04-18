@@ -1,5 +1,24 @@
 import torch
 
+def _quadrature_weights(M, quadrature_weights = None, device = None) -> torch.Tensor:
+    '''
+    Helper function which handles quadrature weights. If none are given, we default to uniform weights.
+    
+    If weights are proved, we check their size and move them to the appropriate device. 
+    '''
+    if quadrature_weights is not None:
+        if W.shape[0] != M:
+            raise ValueError(f"Number of quadrature weights ({W.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
+        if device is not None:
+            W = quadrature_weights.to(device) 
+    
+    else:
+        W = torch.ones(M) / M
+        if device is not None:
+            W = W.to(device)
+    
+    return W
+
 def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor, 
     ridge : float = 3e-1,
     factors : list[float] = [1.0, 10.0, 100.0, 1000.0]
