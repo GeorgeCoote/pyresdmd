@@ -51,7 +51,7 @@ class SirenLayer(nn.Module):
         return torch.sin(self.w0 * self.linear(x))
 
 class SIRENModule(nn.Module):
-    def __init__(self, input_dim : int, n_functions : int, hidden_dim : int, hidden_layers : int = 2, w0_first : float = 30.0, w0 : float = 1.0):
+    def __init__(self, input_dim : int, n_functions : int, hidden_dim : int, hidden_layers : int = 1, w0_first : float = 30.0, w0 : float = 1.0):
         '''
         Initializes trainable SIREN network.
         
