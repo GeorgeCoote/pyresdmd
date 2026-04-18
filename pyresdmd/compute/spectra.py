@@ -209,12 +209,12 @@ def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Ten
 
     # need to cast to complex dtype because Lambda is complex
     complex_dtype = torch.complex128 if Psi_X.dtype == torch.float64 else torch.complex64
-    WPsi_X = (W_sqrt * Psi_X).to(complex_dtype)
-    WPsi_Y = (W_sqrt * Psi_Y).to(complex_dtype)
+    W_sqrtPsi_X = (W_sqrt * Psi_X).to(complex_dtype)
+    W_sqrtPsi_Y = (W_sqrt * Psi_Y).to(complex_dtype)
     
-    diff = WPsi_Y @ V - (WPsi_X @ V) * Lambda.unsqueeze(0) # = [... - ... * lambda_1, ... - ... * lambda_2, ...] etc.
+    diff = W_sqrtPsi_Y @ V - (W_sqrtPsi_X @ V) * Lambda.unsqueeze(0) # = [... - ... * lambda_1, ... - ... * lambda_2, ...] etc.
     numerators = torch.linalg.vector_norm(diff, ord = 2, dim = 0)
-    denominators = torch.linalg.vector_norm(WPsi_X @ V, ord = 2, dim = 0)
+    denominators = torch.linalg.vector_norm(W_sqrtPsi_X @ V, ord = 2, dim = 0)
     
     return (numerators / denominators).real 
 
