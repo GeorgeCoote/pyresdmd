@@ -8,7 +8,7 @@ def _quadrature_weights(M, quadrature_weights = None, device = None) -> torch.Te
     '''
     if quadrature_weights is not None:
         if quadrature_weights.shape[0] != M:
-            raise ValueError(f"Number of quadrature weights ({quadrature_weights.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
+            raise ValueError(f"Number of quadrature weights ({quadrature_weights.shape[0]}) is not equal to the specified M ({M})")
         
         W = quadrature_weights
         
