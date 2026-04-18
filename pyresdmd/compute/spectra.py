@@ -259,3 +259,63 @@ def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor,
     cond_penalty = torch.relu(log_kappa - log_kappa_thresh) if use_cond_penalty else torch.zeros_like(log_kappa)
     
     return (1/N)*torch.sum(residuals * residuals) + penalty_coef * cond_penalty
+
+def spectra(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadrature_weights : torch.Tensor = None, 
+    eps : float = 1e-8, ridge : float = 3e-1, factors : list[float] = [1.0, 10.0, 100.0, 1000.0]
+    ) -> dict:
+    '''
+    Convenient function to create dictionary containing:
+        the eigendecomposition of the EDMD matrix
+        the condition number of W^(1/2) Psi_X
+        the residuals associated with the eigenvalues of the EDMD matrix 
+        the loss associated with the EDMD matrix
+    
+    Parameters
+    ----------------------------------
+    Psi_X : torch.Tensor 
+        The Hankel matrix Psi_X 
+    
+    Psi_Y : torch.Tensor 
+        The Hankel matrix Psi_Y
+    
+    quadrature_weights : torch.Tensor 
+        The tensor of quadrature weights 
+    
+    eps : float 
+        Offset to be used in condition number computation. 
+    
+    ridge : float
+        Ridge to use for EDMD computation. 
+    
+    factors : float 
+        Factors to use for EDMD computation.
+    
+    Returns
+    ----------------------------------
+    dict
+        'eigenvalues': The eigenvalues of the EDMD matrix 
+        'eigenvectors': The eigenvectors of the EDMD matrix 
+        'cond_num': The condition number of W^(1/2) Psi_X 
+        'residuals': The residuals associated with the approximated eigenvalues 
+        'loss': The overall loss
+    '''
+    W = _quadrature_weights(M = Psi_X.shape[0], quadrature_weights = quadrature_weights, device = Psi_X.device)
+    Lambda, V = compute_eigendecomposition(Psi_X, Psi_Y, W)
+    K = EDMD(Psi_X, Psi_Y, W, ridge, factors) 
+    residuals = compute_residuals(Lambda, V, Psi_X, Psi_Y, W)
+        
+    W_sqrt = torch.sqrt(W).unsqueeze(1)
+    W_sqrtPsi_X = W_sqrt * Psi_X 
+    singvals = torch.linalg.svdvals(W_sqrtPsi_X)
+    
+    cond_num = (singvals[0] + eps)/(singvals[-1] + eps)
+    
+    loss = compute_loss(singvals, residuals, eps)
+
+    return {
+        'eigenvalues': Lambda, 
+        'eigenvectors': V,
+        'cond_num': cond_num,
+        'residuals': residuals,
+        'loss': loss
+    }
