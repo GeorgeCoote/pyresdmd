@@ -251,7 +251,10 @@ def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor,
     '''
     condition_penalty_flag = condition_penalty # to avoid confusion with cond_penalty
     N = residuals.shape[0]
+    
     log_kappa = torch.log(singvals[0] + eps) - torch.log(singvals[-1] + eps)
     log_kappa_thresh = torch.log(torch.tensor(loss_threshold, device = singvals.device))
+    
     cond_penalty = torch.relu(log_kappa - log_kappa_thresh) if condition_penalty_flag else torch.zeros_like(log_kappa)
+    
     return (1/N)*torch.sum(residuals * residuals) + penalty_coef * cond_penalty
