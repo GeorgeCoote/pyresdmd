@@ -34,8 +34,8 @@ def krylov_matrices(g, x : torch.Tensor, M : int, N : int) -> tuple[torch.tensor
     if x.shape[0] != M + N:
         raise ValueError(f"x has incorrect size. Expected {M + N}, got {x.shape[0]}")
     gx = g(x)
-    rows = torch.arange(M, device = gx.device).unsqueeze(1) # change shape from (M,) to (M, 1)
-    cols = torch.arange(N, device = gx.device).unsqueeze(0) # change shape from (M,) to (1, M)
+    rows = torch.arange(M, device = x.device).unsqueeze(1) # change shape from (M,) to (M, 1)
+    cols = torch.arange(N, device = x.device).unsqueeze(0) # change shape from (M,) to (1, M)
     idx = rows + cols # creates idx[i, j] = i + j
     
     return gx[idx], gx[idx + 1]
