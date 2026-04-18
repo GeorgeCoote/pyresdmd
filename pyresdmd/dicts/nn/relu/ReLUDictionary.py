@@ -30,7 +30,7 @@ class ReLUDictionary(BaseDictionary):
         self._n_functions = n_functions 
     
         self.networks = nn.ModuleList([
-            NeuralNetworkModule(input_dim, hidden_dim, hidden_layers) 
+            ReLUModule(input_dim, hidden_dim, hidden_layers) 
             for _ in range(n_functions)
         ])
     
