@@ -110,7 +110,7 @@ def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
     ATB = (A.T @ B)
     
     for f in factors:
-        coef = float(ridge) * f
+        coef = ridge * f
         ATA = A.T @ A + coef * torch.eye(N, device = A.device, dtype = A.dtype)
         
         try:
@@ -160,8 +160,7 @@ def compute_eigendecomposition(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadr
 
     return torch.linalg.eig(K)
 
-def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
-                     same_device : bool = True) -> torch.Tensor:
+def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor) -> torch.Tensor:
     '''
     Computes ResDMD residuals based off EDMD matrix, eigendecomposition, Hankel matrices and quadrature weights. 
     
@@ -192,9 +191,6 @@ def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Ten
     
     W : torch.Tensor 
         Matrix of quadrature weights
-
-    same_device : bool
-        Moves quadrature weights to the same device as Psi_X, if it not already there.
     
     Returns 
     ----------------------------------
@@ -202,9 +198,10 @@ def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Ten
         Tensor of residuals for each eigenpair 
     '''
     M = Psi_X.shape[0]
-    device = Psi_X.device if same_device else None
 
-    W = _quadrature_weights(M, W, device)
+    if W.shape[0] != M:
+        raise ValueError(f"Number of quadrature weights ({quadrature_weights.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
+
     W_sqrt = torch.sqrt(W).unsqueeze(1)
 
     # need to cast to complex dtype because Lambda is complex
@@ -219,7 +216,7 @@ def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Ten
     return (numerators / denominators).real 
 
 def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor, 
-    eps : float = 1e-8, loss_threshold : float = 1e3, condition_penalty : bool = True, penalty_coef : float = 1e-2,
+    eps : float = 1e-8, loss_threshold : float = 1e3, use_cond_penalty : bool = True, penalty_coef : float = 1e-2,
 ) -> float:
     '''
     Computes loss function based off singular values of weighted Hankel matrix. 
@@ -245,6 +242,8 @@ def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor,
         Offset in logarithm of condition number for numerical stability (for singular values near zero) 
     loss_threshold : float 
         Minimum condition number to penalize. 
+    use_cond_penalty : bool
+        Enable/disable condition penalty
     penalty_coef : float 
         Penalty assigned to condition number
     
@@ -252,12 +251,11 @@ def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor,
     ----------------------------------
     Loss computed by the above formula.
     '''
-    condition_penalty_flag = condition_penalty # to avoid confusion with cond_penalty
     N = residuals.shape[0]
     
     log_kappa = torch.log(singvals[0] + eps) - torch.log(singvals[-1] + eps)
     log_kappa_thresh = torch.log(torch.tensor(loss_threshold, device = singvals.device))
     
-    cond_penalty = torch.relu(log_kappa - log_kappa_thresh) if condition_penalty_flag else torch.zeros_like(log_kappa)
+    cond_penalty = torch.relu(log_kappa - log_kappa_thresh) if use_cond_penalty else torch.zeros_like(log_kappa)
     
     return (1/N)*torch.sum(residuals * residuals) + penalty_coef * cond_penalty
