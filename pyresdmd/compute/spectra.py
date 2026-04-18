@@ -120,3 +120,137 @@ def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
     
     # fallback has failed
     raise ValueError("EDMD fail after exhausting regularizing factors. Perhaps try stronger regularization.")
+
+def compute_eigendecomposition(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadrature_weights : torch.Tensor = None, same_device : bool = True) -> torch.Tensor:
+    '''
+    Computes the eigendecomposition of the EDMD matrix based off the Hankel matrices Psi_X and Psi_Y and quadrature weights. 
+    
+    Parameters 
+    ----------------------------------
+    Psi_X : torch.Tensor 
+        The Hankel matrix Psi_X
+    Psi_Y : torch.Tensor 
+        The Hankel matrix Psi_Y 
+    W : torch.Tensor 
+        Torch tensor of quadrature weights
+    same_device : bool
+        If W is not on the same device as Psi_X, it will be moved there if this is set to True.
+    
+    Returns 
+    ----------------------------------
+    2-tuple
+        (Lambda, V)
+            The eigendecomposition of K 
+    
+    Raises 
+    ----------------------------------
+    ValueError
+        If number of quadrature weights is not equal to the number of snapshots. 
+    '''
+
+    M = Psi_X.shape[0]
+    device = Psi_X.device if same_device else None
+    W = _quadrature_weights(M, quadrature_weights, device)
+
+    K = EDMD(Psi_X, Psi_Y, W)
+
+    return torch.linalg.eig(K)
+
+def compute_residuals(K : torch.Tensor, V : torch.Tensor, Lambda : torch.Tensor, Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor
+                     same_device : bool = True) -> torch.Tensor:
+    '''
+    Computes ResDMD residuals based off EDMD matrix, eigendecomposition, Hankel matrices and quadrature weights. 
+    
+    The formula for the ResDMD residual is:
+        res(lambda_j, v_j) = ||(W^(1/2) Psi_Y - lambda_j W^{1/2} Psi_X) v_j||_2 / ||W^(1/2) Psi_X v_j||_2
+    As usual this is computed in a vectorized way. 
+    
+    Of course since this is the quotient of two real numbers, it ought to be real. Since the vectors of concern may have 
+    large imaginary parts that formally cancel, there is always a risk that the quantity has a spurious imaginary part. 
+    
+    Hence we technically compute:
+        Re(||(W^(1/2) Psi_Y - lambda_j W^{1/2} Psi_X) v_j||_2 / ||W^(1/2) Psi_X v_j||_2)
+    which mathematically is the same quantity.
+    
+    Parameters
+    ----------------------------------
+    K : torch.Tensor 
+        EDMD matrix. 
+    
+    V : torch.Tensor 
+        Eigenvectors in eigendecomposition 
+       
+    Lambda : torch.Tensor 
+        Eigenvalues in eigendecomposition
+    
+    Psi_X : torch.Tensor 
+        Hankel matrix for x
+    
+    Psi_Y : torch.Tensor 
+        Hankel matrix for y 
+    
+    W : torch.Tensor 
+        Matrix of quadrature weights
+
+    same_device : bool
+        Moves quadrature weights to the same device as K, if it not already there.
+    
+    Returns 
+    ----------------------------------
+    torch.Tensor 
+        Tensor of residuals for each eigenpair 
+    '''
+    M = Psi_X.shape[0]
+    device = K.device if same_device else None
+
+    W = _quadrature_weights(M, W, device)
+    W_sqrt = torch.sqrt(W).unsqueeze(1)
+    WPsi_X = (W_sqrt * Psi_X).to(torch.complex64)
+    WPsi_Y = (W_sqrt * Psi_Y).to(torch.complex64)
+    
+    diff = WPsi_Y @ V - (WPsi_X @ V) * Lambda.unsqueeze(0) # = [... - ... * lambda_1, ... - ... * lambda_2, ...] etc.
+    numerators = torch.linalg.vector_norm(diff, ord = 2, dim = 0)
+    denominators = torch.linalg.vector_norm(WPsi_X @ V, ord = 2, dim = 0)
+    
+    return (numerators / denominators).real 
+
+def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor, 
+    eps : float = 1e-8, loss_threshold : float = 1e3, penalty_coef : float = 1e-2,
+    condition_penalty : bool = True,
+) -> float:
+    '''
+    Computes loss function based off singular values of weighted Hankel matrix. 
+    
+    We use ResDMD residuals as well as a penalty term for large condition numbers. 
+
+    The formula will be:
+        loss((lambda_j, v_j)) = (1/N) sum_j |res(lambda_j, v_j)|^2 + c * ReLU(log(kappa) - log(kappa_0))
+    where:
+        N is the number of eigenpairs 
+        (lambda_j, v_j) are the eigenpairs, and the sum goes over them 
+        kappa is the condition number of the Hankel matrix Psi_X 
+        kappa_0 is a large condition number past which we kick in a penalty. 
+    Note that this loss is convex and differentiable away from kappa = kappa_0.
+    
+    Parameters 
+    ----------------------------------
+    singvals : torch.Tensor 
+        Singular values of the weighted Hankel matrix W_sqrt * Psi_X 
+    residuals : torch.Tensor 
+        ResDMD residuals computed by compute_residuals.
+    eps : float 
+        Offset in logarithm of condition number for numerical stability (for singular values near zero) 
+    loss_threshold : float 
+        Minimum condition number to penalize. 
+    penalty_coef : float 
+        Penalty assigned to condition number
+    
+    Returns 
+    ----------------------------------
+    Loss computed by the above formula.
+    '''
+    N = residuals.shape[0]
+    log_kappa = torch.log(singvals[0] + eps) - torch.log(singvals[-1] + eps)
+    log_kappa_thresh = torch.log(torch.tensor(loss_threshold, device = singvals.device))
+    cond_penalty = torch.relu(log_kappa - log_kappa_thresh) if condition_penalty else torch.zeros_like(log_kappa)
+    return (1/N)*torch.sum(residuals * residuals) + penalty_coef * cond_penalty
