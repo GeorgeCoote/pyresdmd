@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from pyresdmd.dicts import Dictionary
+from pyresdmd.dicts.dictionary import Dictionary
 from pyresdmd.dicts.nn.relu.relu_module import ReLUModule
 
 class ReLUDictionary(Dictionary):
@@ -31,7 +31,7 @@ class ReLUDictionary(Dictionary):
         self._n_functions = n_functions 
     
         self.networks = nn.ModuleList([
-            ReLUModule(input_dim, hidden_dim, hidden_layers)
+            ReLUModule(input_dim, hidden_dim, hidden_layers) 
             for _ in range(n_functions)
         ])
     

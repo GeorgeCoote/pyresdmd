@@ -1,9 +1,10 @@
-from pyresdmd.dicts import BaseDictionary
 import torch
-from itertools import combinations_with_replacement, product
+import torch.nn.functional as F
+from pyresdmd.dicts.dictionary import Dictionary
+from itertools import combinations_with_replacement
 
-class PolynomialDictionary(BaseDictionary):
-    def __init__(self, input_dim : int, degree : int):
+class PolynomialDictionary(Dictionary):
+    def __init__(self, input_dim : int, degree : int) -> None:
         '''
         Initializes polynomial dictionary. 
         
@@ -31,17 +32,20 @@ class PolynomialDictionary(BaseDictionary):
         
         powers = []
         for d in range(degree + 1):
-            for combo in combinations_with_replacement(range(input_dim), d):
-                # this iterates over d-tuples with elements <= input_dim
-                # the number of appearances of k corresponds to the largest power of x_k that should appear in the polynomial.
-                # for example (1, 1, 2, 3) means that we allow squared terms in x and linear terms in y, z.
-                
-                p = [0] * input_dim 
-                for idx in combo:
-                    p[idx] += 1
-                powers.append(p)
-           
-        self.register_buffer('powers', torch.tensor(powers))
+            combos = list(combinations_with_replacement(range(input_dim), d))
+
+            if d == 0:
+                powers.append(torch.zeros((1, input_dim), dtype = torch.long))
+                continue
+
+            combo_tensor = torch.tensor(combos, dtype = torch.long)
+
+            degree_powers = F.one_hot(combo_tensor, num_classes = input_dim).sum(dim = 1)
+            # eg combo_tensor = [[1, 1, 2]], input_dim = 4 gives [[0, 1, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]
+            # summing across columns gives [0, 2, 1, 0] which translates to x_1^0 * x_2^2 * x_3 * x_4^0 as expected
+            powers.append(degree_powers)
+
+        self.register_buffer('powers', torch.cat(powers, dim = 0))
         
     @property 
     def size(self) -> int:

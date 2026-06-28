@@ -1,8 +1,8 @@
-from pyresdmd.dicts import BaseDictionary
+from pyresdmd.dicts.dictionary import Dictionary
 import torch
 
-class HermiteDictionary(BaseDictionary):
-    def __init__(self, degree : int):
+class HermiteDictionary(Dictionary):
+    def __init__(self, degree : int) -> None:
         '''
         Initializes Hermite dictionary. 
       

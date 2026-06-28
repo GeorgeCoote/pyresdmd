@@ -1,31 +1,31 @@
 import torch
 
-def _quadrature_weights(M, quadrature_weights = None, device = None) -> torch.Tensor:
+def _quadrature_weights(M, quadrature_weights : torch.Tensor | None = None, device : torch.device | str | None = None, dtype : torch.dtype | None = None) -> torch.Tensor:
     '''
     Helper function which handles quadrature weights. If none are given, we default to uniform weights.
-    
-    If weights are provided, we check their size and move them to the appropriate device. 
     '''
-    if quadrature_weights is not None:
-        if quadrature_weights.shape[0] != M:
-            raise ValueError(f"Number of quadrature weights ({quadrature_weights.shape[0]}) is not equal to the specified M ({M})")
-        
-        W = quadrature_weights
-        
-        if device is not None:
-            W = W.to(device) 
-    
+    from pyresdmd.utils.helpers import complex_to_real_dtype
+
+    dtype = complex_to_real_dtype(dtype)
+
+    if quadrature_weights is None:
+        W = torch.ones(M, device = device, dtype = dtype) / M
     else:
-        W = torch.ones(M) / M
-        
-        if device is not None:
-            W = W.to(device)
-    
+        if quadrature_weights.ndim != 1 or quadrature_weights.shape[0] != M:
+            raise ValueError(f"quadrature_weights must have shape ({M},)")
+        if torch.is_complex(quadrature_weights):
+            raise ValueError("quadrature_weights must be real-valued")
+        if not torch.isfinite(quadrature_weights).all():
+            raise ValueError("quadrature_weights must be finite")
+        if (quadrature_weights < 0).any():
+            raise ValueError("quadrature_weights must be non-negative")
+        W = quadrature_weights.to(device = device, dtype = dtype)
+
     return W
 
 def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor, 
     ridge : float = 3e-1,
-    factors : list[float] = [1.0, 10.0, 100.0, 1000.0]
+    factors : list[float] = None
 ) -> torch.Tensor:
     '''
     Compute the EDMD matrix (W^(1/2) Psi_X)^\dagger W^(1/2) Psi_Y, where \dagger denotes the Moore-Penrose pseudoinverse 
@@ -40,9 +40,9 @@ def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
     Parameters
     ----------------------------------
     Psi_X : torch.Tensor 
-        The Hankel matrix Psi_X 
+        The lifted data matrix Psi_X 
     Psi_Y : torch.Tensor 
-        The Hankel matrix Psi_Y 
+        The lifted data matrix Psi_Y 
     W : torch.Tensor 
         Torch tensor of quadrature weights. 
     ridge : float 
@@ -63,6 +63,8 @@ def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
         If a quadrature weight is negative. 
         If Psi_X and Psi_Y have different shapes.
     '''
+    if factors is None:
+        factors = [1.0, 10.0, 100.0, 1000.0] # default
     if W.shape[0] != Psi_X.shape[0]:
         raise ValueError(f"Number of quadrature weights ({W.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
     
@@ -100,7 +102,7 @@ def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
         K = sol.to(A.dtype)
         if torch.isfinite(K).all():
             return K
-    except Exception:
+    except RuntimeError:
         pass
     
     # double precision has failed
@@ -108,37 +110,50 @@ def EDMD(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor,
     # try a load of ridges 
     N = A.shape[1]
     ATB = (A.T @ B)
+    ATA = A.T @ A
     
     for f in factors:
         coef = ridge * f
-        ATA = A.T @ A + coef * torch.eye(N, device = A.device, dtype = A.dtype)
+        ATA_reg = ATA + coef * torch.eye(N, device = A.device, dtype = A.dtype)
         
         try:
-            K_candidate = torch.linalg.solve(ATA, ATB)
+            K_candidate = torch.linalg.solve(ATA_reg, ATB)
             K_candidate = K_candidate.to(A.dtype)
             if torch.isfinite(K_candidate).all():
                 return K_candidate 
         
-        except Exception:
+        except RuntimeError:
             continue
     
     # fallback has failed
     raise ValueError("EDMD fail after exhausting regularizing factors. Perhaps try stronger regularization.")
 
-def compute_eigendecomposition(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadrature_weights : torch.Tensor = None, same_device : bool = True) -> torch.Tensor:
+def compute_eigendecomposition_from_weights(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     '''
-    Computes the eigendecomposition of the EDMD matrix based off the Hankel matrices Psi_X and Psi_Y and quadrature weights. 
+    Strict eigendecomposition entry point that assumes quadrature weights are already resolved.
+    '''
+    K = EDMD(Psi_X, Psi_Y, W)
+    return torch.linalg.eig(K)
+
+def compute_eigendecomposition(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadrature_weights : torch.Tensor = None, dtype : torch.dtype = None) -> tuple[torch.Tensor, torch.Tensor]:
+    '''
+    Convenience wrapper for eigendecomposition that resolves quadrature weights before solving.
+
+    For stricter control, call compute_eigendecomposition_from_weights with a pre-validated weight tensor.
     
     Parameters 
     ----------------------------------
     Psi_X : torch.Tensor 
-        The Hankel matrix Psi_X
+        The lifted data matrix Psi_X
     Psi_Y : torch.Tensor 
-        The Hankel matrix Psi_Y 
+        The lifted data matrix Psi_Y 
     quadrature_weights : torch.Tensor 
         Torch tensor of quadrature weights
     same_device : bool
         If W is not on the same device as Psi_X, it will be moved there if this is set to True.
+    dtype : torch.dtype
+        Dtype used when constructing/coercing quadrature weights. If None, defaults to Psi_X.dtype
+        (mapped to the corresponding real dtype for complex Psi_X).
     
     Returns 
     ----------------------------------
@@ -153,16 +168,16 @@ def compute_eigendecomposition(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadr
     '''
 
     M = Psi_X.shape[0]
-    device = Psi_X.device if same_device else None
-    W = _quadrature_weights(M, quadrature_weights, device)
+    device = Psi_X.device
+    if dtype is None:
+        dtype = Psi_X.dtype
+    W = _quadrature_weights(M, quadrature_weights, device, dtype)
 
-    K = EDMD(Psi_X, Psi_Y, W)
-
-    return torch.linalg.eig(K)
+    return compute_eigendecomposition_from_weights(Psi_X, Psi_Y, W)
 
 def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Tensor, Psi_Y : torch.Tensor, W : torch.Tensor) -> torch.Tensor:
     '''
-    Computes ResDMD residuals based off EDMD matrix, eigendecomposition, Hankel matrices and quadrature weights. 
+    Computes ResDMD residuals based off EDMD matrix, eigendecomposition, lifted data matrices and quadrature weights. 
     
     The formula for the ResDMD residual is:
         res(lambda_j, v_j) = ||(W^(1/2) Psi_Y - lambda_j W^{1/2} Psi_X) v_j||_2 / ||W^(1/2) Psi_X v_j||_2
@@ -184,10 +199,10 @@ def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Ten
         Eigenvectors in eigendecomposition 
     
     Psi_X : torch.Tensor 
-        Hankel matrix for x
+        Lifted data matrix for x
     
     Psi_Y : torch.Tensor 
-        Hankel matrix for y 
+        Lifted data matrix for y 
     
     W : torch.Tensor 
         Matrix of quadrature weights
@@ -200,24 +215,28 @@ def compute_residuals(Lambda : torch.Tensor, V : torch.Tensor, Psi_X : torch.Ten
     M = Psi_X.shape[0]
 
     if W.shape[0] != M:
-        raise ValueError(f"Number of quadrature weights ({quadrature_weights.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
+        raise ValueError(f"Number of quadrature weights ({W.shape[0]}) is not equal to the number of snapshots ({Psi_X.shape[0]})")
 
     W_sqrt = torch.sqrt(W).unsqueeze(1)
 
     # need to cast to complex dtype because Lambda is complex
     complex_dtype = torch.complex128 if Psi_X.dtype == torch.float64 else torch.complex64
     W_sqrtPsi_X = (W_sqrt * Psi_X).to(complex_dtype)
+    W_sqrtPsi_X_V = W_sqrtPsi_X @ V
     W_sqrtPsi_Y = (W_sqrt * Psi_Y).to(complex_dtype)
     
-    diff = W_sqrtPsi_Y @ V - (W_sqrtPsi_X @ V) * Lambda.unsqueeze(0) # = [... - ... * lambda_1, ... - ... * lambda_2, ...] etc.
+    diff = W_sqrtPsi_Y @ V - (W_sqrtPsi_X_V) * Lambda.unsqueeze(0) # = [... - ... * lambda_1, ... - ... * lambda_2, ...] etc.
     numerators = torch.linalg.vector_norm(diff, ord = 2, dim = 0)
-    denominators = torch.linalg.vector_norm(W_sqrtPsi_X @ V, ord = 2, dim = 0)
+    denominators = torch.linalg.vector_norm(W_sqrtPsi_X_V, ord = 2, dim = 0)
+
+    if (denominators == 0).any():
+        raise ValueError("One or more zero eigenvectors. This suggests a degenerate dictionary or quadrature weights.")
     
     return (numerators / denominators).real 
 
 def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor, 
     eps : float = 1e-8, loss_threshold : float = 1e3, use_cond_penalty : bool = True, penalty_coef : float = 1e-2,
-) -> float:
+) -> torch.Tensor:
     '''
     Computes loss function based off singular values of weighted Hankel matrix. 
     
@@ -235,7 +254,7 @@ def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor,
     Parameters 
     ----------------------------------
     singvals : torch.Tensor 
-        Singular values of the weighted Hankel matrix W_sqrt * Psi_X 
+        Singular values of the weighted Hankel matrix W_sqrt * Psi_X. Must be sorted in non-increasing order.
     residuals : torch.Tensor 
         ResDMD residuals computed by compute_residuals.
     eps : float 
@@ -251,6 +270,13 @@ def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor,
     ----------------------------------
     Loss computed by the above formula.
     '''
+    if singvals.ndim != 1 or singvals.numel() == 0:
+        raise ValueError("singvals must be a non-empty 1D tensor")
+    if residuals.ndim != 1 or residuals.shape[0] != singvals.shape[0]:
+        raise ValueError("residuals must be a 1D tensor of the same length as singvals")
+    if not torch.all(singvals[:-1] >= singvals[1:]):
+        raise ValueError("singvals must be sorted in non-increasing order")
+
     N = residuals.shape[0]
     
     log_kappa = torch.log(singvals[0] + eps) - torch.log(singvals[-1] + eps)
@@ -260,62 +286,125 @@ def compute_loss(singvals : torch.Tensor, residuals : torch.Tensor,
     
     return (1/N)*torch.sum(residuals * residuals) + penalty_coef * cond_penalty
 
-def spectra(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadrature_weights : torch.Tensor = None, 
-    eps : float = 1e-8, ridge : float = 3e-1, factors : list[float] = [1.0, 10.0, 100.0, 1000.0]
-    ) -> dict:
+def compute_forecast_error(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, K : torch.Tensor) -> torch.Tensor:
     '''
-    Convenient function to create dictionary containing:
-        the eigendecomposition of the EDMD matrix
-        the condition number of W^(1/2) Psi_X
-        the residuals associated with the eigenvalues of the EDMD matrix 
-        the loss associated with the EDMD matrix
-    
+    Computes the normalized one-step EDMD forecast error:
+        sum_i ||psi(y^(i)) - K psi(x^(i))||_2^2 / (sum_i ||psi(y^(i))||_2^2)
+    using all dictionary functions.
+    '''
+    if Psi_X.ndim != 2 or Psi_Y.ndim != 2:
+        raise ValueError("Psi_X and Psi_Y must be 2D tensors")
+    if Psi_X.shape != Psi_Y.shape:
+        raise ValueError("Psi_X and Psi_Y must have the same shape")
+    if K.ndim != 2:
+        raise ValueError("K must be a 2D tensor")
+
+    N = Psi_X.shape[1]
+    if K.shape != (N, N):
+        raise ValueError(f"K must have shape ({N}, {N})")
+
+    if torch.isclose(torch.sum(torch.abs(Psi_Y)), torch.tensor(0.)):
+        raise ValueError("Psi_Y is zero, so all included dictionary functions are zero at all evolved snapshots. This suggests an insufficient or faulty dictionary.")
+    pred = Psi_X @ K
+    diff = Psi_Y - pred
+    numerator = torch.sum(torch.abs(diff) ** 2).real 
+    denominator = torch.sum(torch.abs(Psi_Y) ** 2).real 
+
+    return numerator/denominator
+
+def compute_pseudospectra(Psi_X : torch.Tensor, Psi_Y : torch.Tensor, quadrature_weights : torch.Tensor | None = None,
+                          re_range : tuple[float, float] = (-1.2, 1.2), im_range : tuple[float, float] = (-1.2, 1.2),
+                          grid_resolution : int = 100, chunk_size : int = 512, save : bool = False, filename : str = 'pseudospectra.pt'
+                          ) -> dict[str, torch.Tensor]:
+    '''
+    Computes tau(z) (an approximation to dist(z, Sp(K))) over a grid of points z in the complex plane, where K is the true Koopman operator. The formula for tau(z) is:
+        tau(z) = min_{||v||=1} ||(W^(1/2) Psi_Y - z W^(1/2) Psi_X) v||_2
+    where W is the diagonal matrix of quadrature weights.
+
     Parameters
     ----------------------------------
-    Psi_X : torch.Tensor 
-        The Hankel matrix Psi_X 
+    Psi_X : torch.Tensor
+        The lifted data matrix Psi_X, shape (M, N)
+    Psi_Y : torch.Tensor
+        The lifted data matrix Psi_Y, shape (M, N)
+    quadrature_weights : torch.Tensor | None
+        Optional quadrature weights, shape (M,). If None, defaults to uniform weights.
+    re_range : tuple[float, float]
+        Range of real parts to compute pseudospectrum over. Default (-1.2, 1.2).
+    im_range : tuple[float, float]
+        Range of imaginary parts to compute pseudospectrum over. Default (-1.2, 1.2).
+    grid_resolution : int
+        Number of points in each dimension to compute pseudospectrum over. Default 100.
+    chunk_size : int
+        Number of gridpoints to process in each batch when computing pseudospectrum. Default 512.
     
-    Psi_Y : torch.Tensor 
-        The Hankel matrix Psi_Y
-    
-    quadrature_weights : torch.Tensor 
-        The tensor of quadrature weights 
-    
-    eps : float 
-        Offset to be used in condition number computation. 
-    
-    ridge : float
-        Ridge to use for EDMD computation. 
-    
-    factors : float 
-        Factors to use for EDMD computation.
-    
-    Returns
-    ----------------------------------
-    dict
-        'eigenvalues': The eigenvalues of the EDMD matrix 
-        'eigenvectors': The eigenvectors of the EDMD matrix 
-        'cond_num': The condition number of W^(1/2) Psi_X 
-        'residuals': The residuals associated with the approximated eigenvalues 
-        'loss': The overall loss
     '''
-    W = _quadrature_weights(M = Psi_X.shape[0], quadrature_weights = quadrature_weights, device = Psi_X.device)
-    Lambda, V = compute_eigendecomposition(Psi_X, Psi_Y, W)
-    K = EDMD(Psi_X, Psi_Y, W, ridge, factors) 
-    residuals = compute_residuals(Lambda, V, Psi_X, Psi_Y, W)
-        
-    W_sqrt = torch.sqrt(W).unsqueeze(1)
-    W_sqrtPsi_X = W_sqrt * Psi_X 
-    singvals = torch.linalg.svdvals(W_sqrtPsi_X)
-    
-    cond_num = (singvals[0] + eps)/(singvals[-1] + eps)
-    
-    loss = compute_loss(singvals, residuals, eps)
+    device = Psi_X.device 
+    M, N = Psi_X.shape 
+    dtype = Psi_X.dtype
 
+    W = _quadrature_weights(M, quadrature_weights, device, dtype)
+
+    from pyresdmd.utils.helpers import force_h, force_h_vectorized
+
+    W_sqrt = torch.sqrt(W).unsqueeze(1)
+
+    W_sqrt_Psi_X = W_sqrt * Psi_X
+    W_sqrt_Psi_Y = W_sqrt * Psi_Y
+
+    # first, QR decompose W_sqrt_Psi_X 
+    _, R = torch.linalg.qr(W_sqrt_Psi_X, mode = 'reduced')
+    R = R.to(torch.complex128)
+
+    R_inv = torch.linalg.inv(R)
+    R_inv_conj_T = R_inv.conj().T 
+
+    W_sqrt_Psi_X_complex = W_sqrt_Psi_X.to(torch.complex128)
+    W_sqrt_Psi_Y_complex = W_sqrt_Psi_Y.to(torch.complex128)
+
+    cross_corr = R_inv_conj_T @ (W_sqrt_Psi_X_complex.T.conj() @ W_sqrt_Psi_Y_complex) @ R_inv 
+    gram_matrix = R_inv_conj_T @ (W_sqrt_Psi_Y_complex.T.conj() @ W_sqrt_Psi_Y_complex) @ R_inv
+
+    cross_corr_conj_T = cross_corr.conj().T
+
+    gram_matrix = force_h(gram_matrix)
+
+    re_vals = torch.linspace(*re_range, grid_resolution, device = device)
+    im_vals = torch.linspace(*im_range, grid_resolution, device = device)
+    real_grid, imag_grid = torch.meshgrid(re_vals, im_vals, indexing='ij')
+    Z_flat = torch.complex(real_grid.to(torch.float64), imag_grid.to(torch.float64)).reshape(-1)
+    tau_flat = torch.zeros(len(Z_flat), dtype=torch.float32, device = device)
+
+    identity = torch.eye(N, dtype = torch.complex128, device = device)
+
+    for start in range(0, len(Z_flat), chunk_size):
+        end = min(start + chunk_size, len(Z_flat))
+        Z_batch = Z_flat[start:end].to(device)
+        Z_batch_conj = Z_batch.conj()
+
+        Z_vec = Z_batch[:, None, None]
+        Z_conj_vec = Z_batch_conj[:, None, None]
+
+        A_batch = (
+            gram_matrix[None]
+            - Z_vec * cross_corr_conj_T[None]
+            - Z_conj_vec * cross_corr[None]
+            + (Z_conj_vec * Z_vec) * identity[None]
+        )
+
+        A_batch = force_h_vectorized(A_batch)
+
+        eigvals = torch.linalg.eigvalsh(A_batch)
+
+        tau_flat[start:end] = (
+            eigvals[:, 0].real.clamp(min = 0).sqrt().to(dtype = torch.float32, device = device)
+        )
+    
+    if save:
+        torch.save(tau_flat.reshape(grid_resolution, grid_resolution).cpu(), filename)
+    
     return {
-        'eigenvalues': Lambda, 
-        'eigenvectors': V,
-        'cond_num': cond_num,
-        'residuals': residuals,
-        'loss': loss
+        're_vals': re_vals.cpu(),
+        'im_vals': im_vals.cpu(),
+        'tau_grid': tau_flat.reshape(grid_resolution, grid_resolution).cpu()
     }

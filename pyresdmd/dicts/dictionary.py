@@ -2,7 +2,8 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
-class BaseDictionary(ABC, nn.Module):
+
+class Dictionary(ABC, nn.Module):
     '''
     Abstract class serving as a template for dictionary classes.
     '''
@@ -33,4 +34,4 @@ class BaseDictionary(ABC, nn.Module):
         '''
         Function for forward step.
         '''
-        return self.evaluate(x) 
+        return self.evaluate(x)

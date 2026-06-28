@@ -1,8 +1,8 @@
-from pyresdmd.dicts import BaseDictionary
+from pyresdmd.dicts.dictionary import Dictionary
 import torch
 
-class ChebyshevDictionary(BaseDictionary):
-    def __init__(self, degree : int):
+class ChebyshevDictionary(Dictionary):
+    def __init__(self, degree : int, scale : float) -> None:
         '''
         Initializes Chebyshev dictionary. 
       
@@ -20,6 +20,7 @@ class ChebyshevDictionary(BaseDictionary):
         
         super().__init__()
         self.degree = degree 
+        self.scale = scale
     
     @property 
     def size(self) -> int:
@@ -51,17 +52,33 @@ class ChebyshevDictionary(BaseDictionary):
             
             If x has shape (M, 1) or (M,), and N = self.degree, then the output will have shape (M, N).
             
-            The jth row is equal to T_0(x_j), T_1(x_j), ..., T_N(x_j). 
+            The jth row is equal to T_0(s * x_j), T_1(s * x_j), ..., T_N(s * x_j), 
+            where s = self.scale.
+
+        Attributes 
+        -------------------------
+        self.scale : float 
+            A multiplicative factor applied to the input before evaluation. The 
+            Chebyshev recurrence is applied to (scale * x) rather than to x directly, 
+            so each column j of the output holds T_j(scale * x). 
+
+            This rescales the input domain onto the standard Chebyshev interval 
+            [-1, 1]: if the inputs x naturally live in [a, b], choosing an appropriate 
+            scale (together with any centering done upstream) maps them into [-1, 1], 
+            where the Chebyshev polynomials are well-conditioned and orthogonal. A 
+            scale of 1.0 leaves the input unchanged and recovers the standard 
+            Chebyshev polynomials T_j(x). 
         '''
+        scale = self.scale
         x = x.flatten()
         out = torch.zeros(x.shape[0], self.degree + 1, dtype = x.dtype, device = x.device) 
         
         out[:, 0] = 1.0
         if self.degree >= 1:
-            out[:, 1] = x
+            out[:, 1] = scale * x
         
         for j in range(2, self.degree + 1):
-            out[:, j] = 2 * x * out[:, j - 1] - out[:, j - 2]
+            out[:, j] = 2 * scale * x * out[:, j - 1] - out[:, j - 2]
         
         return out
     
@@ -70,4 +87,4 @@ class ChebyshevDictionary(BaseDictionary):
         Prints a debug representation of a Chebyshev dictionary, reporting the degree. Typically to be called
         by writing x in the REPL where x is a ChebyshevDictionary object, or by print(x). 
         '''
-        return f"ChebyshevDictionary(degree = {self.degree})"
+        return f"ChebyshevDictionary(degree = {self.degree}, scale = {self.scale})"

@@ -1,8 +1,8 @@
-from resdmd.dicts import BaseDictionary
+from pyresdmd.dicts.dictionary import Dictionary
 import torch
 
-class FourierModeDictionary(BaseDictionary):
-    def __init__(self, max_mode : int):
+class FourierModeDictionary(Dictionary):
+    def __init__(self, max_mode : int) -> None:
         '''
         Initializes Fourier mode dictionary. 
         
