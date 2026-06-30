@@ -34,7 +34,4 @@ pyresdmd/
 |  |- pendulum                  - simulates nonlinear 1D pendulum
 |  |- rossler                   - simulates Rossler oscillator 
 |  |- undamped_harmonic         - simulates undamped harmonic oscillator
-```
-
-## Attribution
-GitHub Copilot was used in many places of this code to speed up refactoring and to help out with packaging. Code was tested and checked by a human. 
+``` 
