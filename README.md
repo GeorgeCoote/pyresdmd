@@ -32,6 +32,12 @@ pyresdmd/
 |- sims
 |  |- duffing                   - simulates Duffing oscillator
 |  |- pendulum                  - simulates nonlinear 1D pendulum
-|  |- rossler                   - simulates Rossler oscillator 
+|  |- rossler                   - simulates Rossler oscillator
+|  |- oisst                     - climate data simulaton
 |  |- undamped_harmonic         - simulates undamped harmonic oscillator
+|- examples
+|  |- duffing                   - demonstrates Duffing oscillator
+|  |- pendulum                  - demonstrates Pendulum
+|  |- rossler                   - demonstrates Rossler
+|  |- undamped_harmonic         - demonstrates Undamped Harmonic 
 ``` 
